@@ -629,14 +629,11 @@ local function set_colors()
       vim.api.nvim_set_hl(0, conf.name, { default = true, link = conf.link })
     end
   end
-  if not pcall(vim.api.nvim_get_hl_by_name, "FloatTitle") then
-    local border = vim.api.nvim_get_hl_by_name("FloatBorder", true)
-    local normal = vim.api.nvim_get_hl_by_name("Normal", true)
-    vim.api.nvim_set_hl(
-      0,
-      "FloatTitle",
-      { fg = normal.foreground, bg = border.background or normal.background }
-    )
+  local float_title = vim.api.nvim_get_hl(0, { name = "FloatTitle" })
+  if vim.tbl_isempty(float_title) then
+    local border = vim.api.nvim_get_hl(0, { name = "FloatBorder" })
+    local normal = vim.api.nvim_get_hl(0, { name = "Normal" })
+    vim.api.nvim_set_hl(0, "FloatTitle", { fg = normal.fg, bg = border.bg or normal.bg })
   end
 end
 
