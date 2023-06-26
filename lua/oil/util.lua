@@ -1,5 +1,12 @@
 local config = require("oil.config")
+local constants = require("oil.constants")
+
 local M = {}
+
+local FIELD_ID = constants.FIELD_ID
+local FIELD_NAME = constants.FIELD_NAME
+local FIELD_TYPE = constants.FIELD_TYPE
+local FIELD_META = constants.FIELD_META
 
 ---@param url string
 ---@return nil|string
@@ -12,7 +19,7 @@ end
 ---@param filename string
 ---@return string
 M.escape_filename = function(filename)
-  local ret = filename:gsub("([%%#])", "\\%1")
+  local ret = filename:gsub("([%%#$])", "\\%1")
   return ret
 end
 
@@ -84,12 +91,11 @@ end
 ---@param entry oil.InternalEntry
 ---@return oil.Entry
 M.export_entry = function(entry)
-  local FIELD = require("oil.constants").FIELD
   return {
-    name = entry[FIELD.name],
-    type = entry[FIELD.type],
-    id = entry[FIELD.id],
-    meta = entry[FIELD.meta],
+    name = entry[FIELD_NAME],
+    type = entry[FIELD_TYPE],
+    id = entry[FIELD_ID],
+    meta = entry[FIELD_META],
   }
 end
 
@@ -348,7 +354,11 @@ M.add_title_to_win = function(winid, opts)
       noautocmd = true,
     })
     winid_map[winid] = title_winid
-    vim.wo[title_winid].winblend = vim.wo[winid].winblend
+    vim.api.nvim_set_option_value(
+      "winblend",
+      vim.wo[winid].winblend,
+      { scope = "local", win = title_winid }
+    )
     vim.bo[bufnr].bufhidden = "wipe"
 
     local update_autocmd = vim.api.nvim_create_autocmd("BufWinEnter", {
@@ -397,7 +407,11 @@ M.add_title_to_win = function(winid, opts)
   end
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, true, { " " .. title .. " " })
   vim.bo[bufnr].modified = false
-  vim.wo[title_winid].winhighlight = "Normal:FloatTitle,NormalFloat:FloatTitle"
+  vim.api.nvim_set_option_value(
+    "winhighlight",
+    "Normal:FloatTitle,NormalFloat:FloatTitle",
+    { scope = "local", win = title_winid }
+  )
 end
 
 ---@param action oil.Action

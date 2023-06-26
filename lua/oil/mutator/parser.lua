@@ -1,10 +1,15 @@
 local cache = require("oil.cache")
 local columns = require("oil.columns")
+local constants = require("oil.constants")
 local fs = require("oil.fs")
 local util = require("oil.util")
 local view = require("oil.view")
-local FIELD = require("oil.constants").FIELD
 local M = {}
+
+local FIELD_ID = constants.FIELD_ID
+local FIELD_NAME = constants.FIELD_NAME
+local FIELD_TYPE = constants.FIELD_TYPE
+local FIELD_META = constants.FIELD_META
 
 ---@alias oil.Diff oil.DiffNew|oil.DiffDelete|oil.DiffChange
 
@@ -36,6 +41,19 @@ local function parsedir(name)
     name = name:sub(1, name:len() - 1)
   end
   return name, isdir
+end
+
+---@param meta nil|table
+---@param parsed_entry table
+---@return boolean True if metadata and parsed entry have the same link target
+local function compare_link_target(meta, parsed_entry)
+  if not meta or not meta.link then
+    return false
+  end
+  -- Make sure we trim off any trailing path slashes from both sources
+  local meta_name = meta.link:gsub("[/\\]$", "")
+  local parsed_name = parsed_entry.link_target:gsub("[/\\]$", "")
+  return meta_name == parsed_name
 end
 
 ---@class oil.ParseResult
@@ -89,8 +107,8 @@ M.parse_line = function(adapter, line, column_defs)
   end
 
   -- Parse the symlink syntax
-  local meta = entry[FIELD.meta]
-  local entry_type = entry[FIELD.type]
+  local meta = entry[FIELD_META]
+  local entry_type = entry[FIELD_TYPE]
   if entry_type == "link" and meta and meta.link then
     local name_pieces = vim.split(ret.name, " -> ", { plain = true })
     if #name_pieces ~= 2 then
@@ -105,7 +123,7 @@ M.parse_line = function(adapter, line, column_defs)
 
   -- Try to keep the same file type
   if entry_type ~= "directory" and entry_type ~= "file" and ret._type ~= "directory" then
-    ret._type = entry[FIELD.type]
+    ret._type = entry[FIELD_TYPE]
   end
 
   return { data = ret, entry = entry, ranges = ranges }
@@ -135,7 +153,7 @@ M.parse = function(bufnr)
   local original_entries = {}
   for _, child in pairs(children) do
     if view.should_display(child, bufnr) then
-      original_entries[child[FIELD.name]] = child[FIELD.id]
+      original_entries[child[FIELD_NAME]] = child[FIELD_ID]
     end
   end
   local seen_names = {}
@@ -180,9 +198,9 @@ M.parse = function(bufnr)
         goto continue
       end
       check_dupe(parsed_entry.name, i)
-      local meta = entry[FIELD.meta]
+      local meta = entry[FIELD_META]
       if original_entries[parsed_entry.name] == parsed_entry.id then
-        if entry[FIELD.type] == "link" and (not meta or meta.link ~= parsed_entry.link_target) then
+        if entry[FIELD_TYPE] == "link" and not compare_link_target(meta, parsed_entry) then
           table.insert(diffs, {
             type = "new",
             name = parsed_entry.name,
@@ -208,7 +226,7 @@ M.parse = function(bufnr)
           table.insert(diffs, {
             type = "change",
             name = parsed_entry.name,
-            entry_type = entry[FIELD.type],
+            entry_type = entry[FIELD_TYPE],
             column = col_name,
             value = parsed_entry[col_name],
           })
