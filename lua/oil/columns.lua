@@ -12,10 +12,13 @@ local all_columns = {}
 
 ---@alias oil.ColumnSpec string|table
 
----@class oil.ColumnDefinition
+---@class (exact) oil.ColumnDefinition
 ---@field render fun(entry: oil.InternalEntry, conf: nil|table): nil|oil.TextChunk
 ---@field parse fun(line: string, conf: nil|table): nil|string, nil|string
----@field meta_fields nil|table<string, fun(parent_url:L string, entry: oil.InternalEntry, cb: fn(err: nil|string))>
+---@field meta_fields nil|table<string, fun(parent_url: string, entry: oil.InternalEntry, cb: fun(err: nil|string))>
+---@field compare? fun(entry: oil.InternalEntry, parsed_value: any): boolean
+---@field render_action? fun(action: oil.ChangeAction): string
+---@field perform_action? fun(action: oil.ChangeAction, callback: fun(err: nil|string))
 
 ---@param name string
 ---@param column oil.ColumnDefinition
@@ -40,6 +43,7 @@ M.get_supported_columns = function(adapter_or_scheme)
   else
     adapter = adapter_or_scheme
   end
+  assert(adapter)
   local ret = {}
   for _, def in ipairs(config.columns) do
     if get_column(adapter, def) then
@@ -208,16 +212,18 @@ if has_devicons then
           type = meta.link_stat.type
         end
       end
+      local icon, hl
       if type == "directory" then
-        local icon = conf and conf.directory or " "
-        return { icon, "OilDir" }
+        icon = conf and conf.directory or ""
+        hl = "OilDirIcon"
       else
-        local icon
-        local hl
         icon, hl = devicons.get_icon(name)
         icon = icon or (conf and conf.default_file or "")
-        return { icon .. " ", hl }
       end
+      if not conf or conf.add_padding ~= false then
+        icon = icon .. " "
+      end
+      return { icon, hl }
     end,
 
     parse = function(line, conf)

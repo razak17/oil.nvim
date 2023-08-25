@@ -73,10 +73,11 @@ def update_readme_toc():
 
 def update_config_options():
     config_file = os.path.join(ROOT, "lua", "oil", "config.lua")
-    opt_lines = read_section(config_file, r"^\s*local default_config =", r"^}$")
+    opt_lines = ['\n```lua\nrequire("oil").setup({\n']
+    opt_lines.extend(read_section(config_file, r"^\s*local default_config =", r"^}$"))
     replace_section(
         README,
-        r"^require\(\"oil\"\)\.setup\(\{$",
+        r"^## Options$",
         r"^}\)$",
         opt_lines,
     )
@@ -119,6 +120,7 @@ COL_DEFS = [
         + [
             LuaParam("default_file", "string", "Fallback icon for files when nvim-web-devicons returns nil"),
             LuaParam("directory", "string", "Icon for directories"),
+            LuaParam("add_padding", "boolean", "Set to false to remove the extra whitespace after the icon"),
         ],
     ),
     ColumnDef("size", "files, ssh", False, "The size of the file", HL + []),

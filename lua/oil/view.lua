@@ -476,6 +476,7 @@ M.format_entry_cols = function(entry, column_defs, col_width, adapter)
   for i, column in ipairs(column_defs) do
     local chunk = columns.render_col(adapter, column, entry)
     local text = type(chunk) == "table" and chunk[1] or chunk
+    ---@cast text string
     col_width[i + 1] = math.max(col_width[i + 1], vim.api.nvim_strwidth(text))
     table.insert(cols, chunk)
   end
@@ -577,12 +578,20 @@ M.render_buffer_async = function(bufnr, opts, callback)
     return
   end
 
-  adapter.list(bufname, config.columns, function(err, has_more)
+  cache.begin_update_url(bufname)
+  adapter.list(bufname, config.columns, function(err, entries, fetch_more)
     loading.set_loading(bufnr, false)
     if err then
+      cache.end_update_url(bufname)
       handle_error(err)
       return
-    elseif has_more then
+    end
+    if entries then
+      for _, entry in ipairs(entries) do
+        cache.store_entry(bufname, entry)
+      end
+    end
+    if fetch_more then
       local now = vim.loop.hrtime() / 1e6
       local delta = now - start_ms
       -- If we've been chugging for more than 40ms, go ahead and render what we have
@@ -594,7 +603,9 @@ M.render_buffer_async = function(bufnr, opts, callback)
         end)
       end
       first = false
+      vim.defer_fn(fetch_more, 4)
     else
+      cache.end_update_url(bufname)
       -- done iterating
       finish()
     end

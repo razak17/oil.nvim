@@ -1,5 +1,50 @@
 # Changelog
 
+## [2.0.0](https://github.com/stevearc/oil.nvim/compare/v1.1.0...v2.0.0) (2023-08-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* disable netrw by default ([#155](https://github.com/stevearc/oil.nvim/issues/155))
+
+### Bug Fixes
+
+* actions.terminal supports ssh adapter ([#152](https://github.com/stevearc/oil.nvim/issues/152)) ([0ccf95a](https://github.com/stevearc/oil.nvim/commit/0ccf95ae5d0ea731de8d427304f95d384a0664c4))
+* errors when writing files over ssh ([#159](https://github.com/stevearc/oil.nvim/issues/159)) ([bfa0e87](https://github.com/stevearc/oil.nvim/commit/bfa0e8705eb83a0724aed6d5dc9d21aa62a8986b))
+* fix flaky test ([9509ae0](https://github.com/stevearc/oil.nvim/commit/9509ae0feed5af04e4652375740a0722f2ee1a64))
+* remaining type errors ([8f78079](https://github.com/stevearc/oil.nvim/commit/8f7807946a67b5f1a515946f82251e33651bae29))
+* set nomodifiable after BufWritePre in ssh adapter ([#159](https://github.com/stevearc/oil.nvim/issues/159)) ([b61bc9b](https://github.com/stevearc/oil.nvim/commit/b61bc9b701a3cfb05cb6668446b0303cda7435e6))
+* sometimes use shell to run trash command ([#99](https://github.com/stevearc/oil.nvim/issues/99)) ([ff62fc2](https://github.com/stevearc/oil.nvim/commit/ff62fc28cd7976e49ddff6897a4f870785187f13))
+* ssh adapter supports any system with /bin/sh ([#161](https://github.com/stevearc/oil.nvim/issues/161)) ([ebcd720](https://github.com/stevearc/oil.nvim/commit/ebcd720a0987ed39f943c4a5d32b96d42e9cf695))
+* type annotations and type errors ([47c7737](https://github.com/stevearc/oil.nvim/commit/47c77376189e4063b4fcc6dc2c4cfe8ffd72c782))
+
+
+### Performance Improvements
+
+* tweak uv readdir params for performance ([ffb89bf](https://github.com/stevearc/oil.nvim/commit/ffb89bf416a4883cc12e5ed247885d4700b00a0f))
+
+
+### Code Refactoring
+
+* disable netrw by default ([#155](https://github.com/stevearc/oil.nvim/issues/155)) ([9d90893](https://github.com/stevearc/oil.nvim/commit/9d90893c377b6b75230e4bad177f8d0103ceafe4))
+
+## [1.1.0](https://github.com/stevearc/oil.nvim/compare/v1.0.0...v1.1.0) (2023-08-09)
+
+
+### Features
+
+* config to remove icon padding ([#145](https://github.com/stevearc/oil.nvim/issues/145)) ([b24380c](https://github.com/stevearc/oil.nvim/commit/b24380c0e17d21271cc04d94827a07397b9fc4dc))
+
+
+### Bug Fixes
+
+* directory hijacking when oil is lazy loaded ([#149](https://github.com/stevearc/oil.nvim/issues/149)) ([966eaaa](https://github.com/stevearc/oil.nvim/commit/966eaaadbc4d344660f867e41f6b1252459065b2))
+* leave netrw autocmds intact when default_file_explorer = false ([#135](https://github.com/stevearc/oil.nvim/issues/135)) ([789b486](https://github.com/stevearc/oil.nvim/commit/789b486fb5cdc9e31abe9b0569b0e316f9d07bfd))
+* opening oil from netrw defaults to netrw directory ([#148](https://github.com/stevearc/oil.nvim/issues/148)) ([887bb4a](https://github.com/stevearc/oil.nvim/commit/887bb4a8b6c9d73db9c34352d5363ee6289f733e))
+* previewed buffers are deleted once hidden ([#141](https://github.com/stevearc/oil.nvim/issues/141)) ([eaa20a6](https://github.com/stevearc/oil.nvim/commit/eaa20a6aee7c4df89d80ec8208de63ec2fa4d38a))
+* url-escape paths for scp ([#134](https://github.com/stevearc/oil.nvim/issues/134)) ([a5ff72a](https://github.com/stevearc/oil.nvim/commit/a5ff72a8da0df1042ee4c7705c301901062fa6d5))
+* use standard Directory highlight group ([#139](https://github.com/stevearc/oil.nvim/issues/139)) ([f180a9f](https://github.com/stevearc/oil.nvim/commit/f180a9ffab24946a933621108144e2901533d583))
+
 ## 1.0.0 (2023-06-27)
 
 

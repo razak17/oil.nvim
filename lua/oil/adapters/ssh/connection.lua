@@ -1,5 +1,22 @@
 local layout = require("oil.layout")
 local util = require("oil.util")
+
+---@class (exact) oil.sshCommand
+---@field cmd string|string[]
+---@field cb fun(err?: string, output?: string[])
+---@field running? boolean
+
+---@class (exact) oil.sshConnection
+---@field new fun(url: oil.sshUrl): oil.sshConnection
+---@field create_ssh_command fun(url: oil.sshUrl): string[]
+---@field meta {user?: string, groups?: string[]}
+---@field connection_error nil|string
+---@field connected boolean
+---@field private term_bufnr integer
+---@field private jid integer
+---@field private term_winid nil|integer
+---@field private commands oil.sshCommand[]
+---@field private _stdout string[]
 local SSHConnection = {}
 
 local function output_extend(agg, output)
@@ -44,7 +61,8 @@ local function get_last_lines(bufnr, num_lines)
 end
 
 ---@param url oil.sshUrl
-function SSHConnection.new(url)
+---@return string[]
+function SSHConnection.create_ssh_command(url)
   local host = url.host
   if url.user then
     host = url.user .. "@" .. host
@@ -52,39 +70,48 @@ function SSHConnection.new(url)
   local command = {
     "ssh",
     host,
-    "/bin/bash",
-    "--norc",
+  }
+  if url.port then
+    table.insert(command, "-p")
+    table.insert(command, url.port)
+  end
+  return command
+end
+
+---@param url oil.sshUrl
+---@return oil.sshConnection
+function SSHConnection.new(url)
+  local command = SSHConnection.create_ssh_command(url)
+  vim.list_extend(command, {
+    "/bin/sh",
     "-c",
     -- HACK: For some reason in my testing if I just have "echo READY" it doesn't appear, but if I echo
     -- anything prior to that, it *will* appear. The first line gets swallowed.
-    "echo '_make_newline_'; echo '===READY==='; exec /bin/bash --norc",
-  }
-  if url.port then
-    table.insert(command, 2, "-p")
-    table.insert(command, 3, url.port)
-  end
+    "echo '_make_newline_'; echo '===READY==='; exec /bin/sh",
+  })
+  local term_bufnr = vim.api.nvim_create_buf(false, true)
   local self = setmetatable({
-    host = host,
     meta = {},
     commands = {},
     connected = false,
     connection_error = nil,
+    term_bufnr = term_bufnr,
   }, {
     __index = SSHConnection,
   })
 
-  self.term_bufnr = vim.api.nvim_create_buf(false, true)
   local term_id
   local mode = vim.api.nvim_get_mode().mode
-  util.run_in_fullscreen_win(self.term_bufnr, function()
-    term_id = vim.api.nvim_open_term(self.term_bufnr, {
+  util.run_in_fullscreen_win(term_bufnr, function()
+    term_id = vim.api.nvim_open_term(term_bufnr, {
       on_input = function(_, _, _, data)
+        ---@diagnostic disable-next-line: invisible
         pcall(vim.api.nvim_chan_send, self.jid, data)
       end,
     })
   end)
   self.term_id = term_id
-  vim.api.nvim_chan_send(term_id, string.format("ssh %s\r\n", host))
+  vim.api.nvim_chan_send(term_id, string.format("ssh %s\r\n", url.host))
   util.hack_around_termopen_autocmd(mode)
 
   -- If it takes more than 2 seconds to connect, pop open the terminal
@@ -98,6 +125,7 @@ function SSHConnection.new(url)
     pty = true, -- This is require for interactivity
     on_stdout = function(j, output)
       pcall(vim.api.nvim_chan_send, self.term_id, table.concat(output, "\r\n"))
+      ---@diagnostic disable-next-line: invisible
       local new_i_start = output_extend(self._stdout, output)
       self:_handle_output(new_i_start)
     end,
@@ -131,6 +159,7 @@ function SSHConnection.new(url)
     if err then
       vim.notify(string.format("Error fetching ssh connection user: %s", err), vim.log.levels.WARN)
     else
+      assert(lines)
       self.meta.user = vim.trim(table.concat(lines, ""))
     end
   end)
@@ -141,6 +170,7 @@ function SSHConnection.new(url)
         vim.log.levels.WARN
       )
     else
+      assert(lines)
       self.meta.groups = vim.split(table.concat(lines, ""), "%s+", { trimempty = true })
     end
   end)
@@ -181,6 +211,7 @@ function SSHConnection:_handle_output(start_i)
     end
   else
     for i = start_i, #self._stdout - 1 do
+      ---@type string
       local line = self._stdout[i]
       if line:match("^===BEGIN===%s*$") then
         self._stdout = util.tbl_slice(self._stdout, i + 1)

@@ -17,30 +17,30 @@ local FIELD_TYPE = constants.FIELD_TYPE
 
 ---@alias oil.Action oil.CreateAction|oil.DeleteAction|oil.MoveAction|oil.CopyAction|oil.ChangeAction
 
----@class oil.CreateAction
+---@class (exact) oil.CreateAction
 ---@field type "create"
 ---@field url string
 ---@field entry_type oil.EntryType
 ---@field link nil|string
 
----@class oil.DeleteAction
+---@class (exact) oil.DeleteAction
 ---@field type "delete"
 ---@field url string
 ---@field entry_type oil.EntryType
 
----@class oil.MoveAction
+---@class (exact) oil.MoveAction
 ---@field type "move"
 ---@field entry_type oil.EntryType
 ---@field src_url string
 ---@field dest_url string
 
----@class oil.CopyAction
+---@class (exact) oil.CopyAction
 ---@field type "copy"
 ---@field entry_type oil.EntryType
 ---@field src_url string
 ---@field dest_url string
 
----@class oil.ChangeAction
+---@class (exact) oil.ChangeAction
 ---@field type "change"
 ---@field entry_type oil.EntryType
 ---@field url string
@@ -71,6 +71,7 @@ M.create_actions_from_diffs = function(all_diffs)
         if diff.id then
           local by_id = diff_by_id[diff.id]
           -- FIXME this is kind of a hack. We shouldn't be setting undocumented fields on the diff
+          ---@diagnostic disable-next-line: inject-field
           diff.dest = parent_url .. diff.name
           table.insert(by_id, diff)
         else
@@ -184,8 +185,9 @@ M.enforce_action_order = function(actions)
   --   a. TODO optimization: check immediate parents to see if they have no dependencies now
   -- 5. repeat
 
-  -- Gets the dependencies of a particular action. Effectively dynamically calculates the dependency
-  -- "edges" of the graph.
+  ---Gets the dependencies of a particular action. Effectively dynamically calculates the dependency
+  ---"edges" of the graph.
+  ---@param action oil.Action
   local function get_deps(action)
     local ret = {}
     if action.type == "delete" then
@@ -357,7 +359,9 @@ M.process_actions = function(actions, cb)
       if v.type == "delete" then
         local scheme, path = util.parse_url(v.url)
         if config.adapters[scheme] == "files" then
-          actions[i] = {
+          assert(path)
+          ---@type oil.MoveAction
+          local move_action = {
             type = "move",
             src_url = v.url,
             entry_type = v.entry_type,
@@ -366,6 +370,7 @@ M.process_actions = function(actions, cb)
               math.random(999999)
             ),
           }
+          actions[i] = move_action
         end
       end
     end
@@ -439,6 +444,7 @@ M.process_actions = function(actions, cb)
       end
     end)
     if action.type == "change" then
+      ---@cast action oil.ChangeAction
       columns.perform_change_action(adapter, action, callback)
     else
       adapter.perform_action(action, callback)
@@ -499,6 +505,7 @@ M.try_write_changes = function(confirm)
         { all_errors[curbuf][1].lnum + 1, all_errors[curbuf][1].col }
       )
     else
+      ---@diagnostic disable-next-line: param-type-mismatch
       local bufnr, errs = next(pairs(all_errors))
       vim.api.nvim_win_set_buf(0, bufnr)
       pcall(vim.api.nvim_win_set_cursor, 0, { errs[1].lnum + 1, errs[1].col })

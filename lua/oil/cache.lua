@@ -52,10 +52,7 @@ M.create_entry = function(parent_url, name, type)
   if entry then
     return entry
   end
-  local id = next_id
-  next_id = next_id + 1
-  _cached_id_fmt = nil
-  return { id, name, type }
+  return { nil, name, type }
 end
 
 ---@param parent_url string
@@ -68,6 +65,12 @@ M.store_entry = function(parent_url, entry)
     url_directory[parent_url] = parent
   end
   local id = entry[FIELD_ID]
+  if id == nil then
+    id = next_id
+    next_id = next_id + 1
+    entry[FIELD_ID] = id
+    _cached_id_fmt = nil
+  end
   local name = entry[FIELD_NAME]
   parent[name] = entry
   local tmp_dir = tmp_url_directory[parent_url]
@@ -88,12 +91,14 @@ M.create_and_store_entry = function(parent_url, name, type)
   return entry
 end
 
+---@param parent_url string
 M.begin_update_url = function(parent_url)
   parent_url = util.addslash(parent_url)
   tmp_url_directory[parent_url] = url_directory[parent_url]
   url_directory[parent_url] = {}
 end
 
+---@param parent_url string
 M.end_update_url = function(parent_url)
   parent_url = util.addslash(parent_url)
   if not tmp_url_directory[parent_url] then
@@ -136,7 +141,7 @@ M.get_entry_by_url = function(url)
   return cache and cache[name]
 end
 
----@param oil.Action
+---@param action oil.Action
 M.perform_action = function(action)
   if action.type == "create" then
     local scheme, path = util.parse_url(action.url)

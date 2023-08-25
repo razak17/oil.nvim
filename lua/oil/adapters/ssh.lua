@@ -1,4 +1,3 @@
-local cache = require("oil.cache")
 local config = require("oil.config")
 local constants = require("oil.constants")
 local fs = require("oil.fs")
@@ -13,7 +12,7 @@ local M = {}
 
 local FIELD_META = constants.FIELD_META
 
----@class oil.sshUrl
+---@class (exact) oil.sshUrl
 ---@field scheme string
 ---@field host string
 ---@field user nil|string
@@ -22,8 +21,9 @@ local FIELD_META = constants.FIELD_META
 
 ---@param oil_url string
 ---@return oil.sshUrl
-local function parse_url(oil_url)
+M.parse_url = function(oil_url)
   local scheme, url = util.parse_url(oil_url)
+  assert(scheme and url, string.format("Malformed input url '%s'", oil_url))
   local ret = { scheme = scheme }
   local username, rem = url:match("^([^@%s]+)@(.*)$")
   ret.user = username
@@ -80,11 +80,19 @@ local function url_to_scp(url)
   return table.concat(pieces, "")
 end
 
+---@param url1 oil.sshUrl
+---@param url2 oil.sshUrl
+---@return boolean
+local function url_hosts_equal(url1, url2)
+  return url1.host == url2.host and url1.port == url2.port and url1.user == url2.user
+end
+
 local _connections = {}
 ---@param url string
 ---@param allow_retry nil|boolean
+---@return oil.sshFs
 local function get_connection(url, allow_retry)
-  local res = parse_url(url)
+  local res = M.parse_url(url)
   res.scheme = config.adapter_to_scheme.ssh
   res.path = ""
   local key = url_to_str(res)
@@ -124,7 +132,7 @@ ssh_columns.permissions = {
   end,
 
   perform_action = function(action, callback)
-    local res = parse_url(action.url)
+    local res = M.parse_url(action.url)
     local conn = get_connection(action.url)
     conn:chmod(action.value, res.path, callback)
   end,
@@ -168,7 +176,7 @@ end
 ---@param bufname string
 ---@return string
 M.get_parent = function(bufname)
-  local res = parse_url(bufname)
+  local res = M.parse_url(bufname)
   res.path = pathutil.parent(res.path)
   return url_to_str(res)
 end
@@ -176,7 +184,7 @@ end
 ---@param url string
 ---@param callback fun(url: string)
 M.normalize_url = function(url, callback)
-  local res = parse_url(url)
+  local res = M.parse_url(url)
   local conn = get_connection(url, true)
 
   local path = res.path
@@ -197,18 +205,12 @@ end
 
 ---@param url string
 ---@param column_defs string[]
----@param callback fun(err: nil|string, entries: nil|oil.InternalEntry[])
+---@param callback fun(err?: string, entries?: oil.InternalEntry[], fetch_more?: fun())
 M.list = function(url, column_defs, callback)
-  local res = parse_url(url)
+  local res = M.parse_url(url)
 
-  cache.begin_update_url(url)
   local conn = get_connection(url)
-  conn:list_dir(url, res.path, function(err, data)
-    if err or not data then
-      cache.end_update_url(url)
-    end
-    callback(err, data)
-  end)
+  conn:list_dir(url, res.path, callback)
 end
 
 ---@param bufnr integer
@@ -252,9 +254,11 @@ M.render_action = function(action)
     local dest = action.dest_url
     if config.get_adapter_by_scheme(src) == M then
       local _, path = util.parse_url(dest)
+      assert(path)
       dest = files.to_short_os_path(path, action.entry_type)
     else
       local _, path = util.parse_url(src)
+      assert(path)
       src = files.to_short_os_path(path, action.entry_type)
     end
     return string.format("  %s %s -> %s", action.type:upper(), src, dest)
@@ -267,7 +271,7 @@ end
 ---@param cb fun(err: nil|string)
 M.perform_action = function(action, cb)
   if action.type == "create" then
-    local res = parse_url(action.url)
+    local res = M.parse_url(action.url)
     local conn = get_connection(action.url)
     if action.entry_type == "directory" then
       conn:mkdir(res.path, cb)
@@ -277,15 +281,15 @@ M.perform_action = function(action, cb)
       conn:touch(res.path, cb)
     end
   elseif action.type == "delete" then
-    local res = parse_url(action.url)
+    local res = M.parse_url(action.url)
     local conn = get_connection(action.url)
     conn:rm(res.path, cb)
   elseif action.type == "move" then
     local src_adapter = config.get_adapter_by_scheme(action.src_url)
     local dest_adapter = config.get_adapter_by_scheme(action.dest_url)
     if src_adapter == M and dest_adapter == M then
-      local src_res = parse_url(action.src_url)
-      local dest_res = parse_url(action.dest_url)
+      local src_res = M.parse_url(action.src_url)
+      local dest_res = M.parse_url(action.dest_url)
       local src_conn = get_connection(action.src_url)
       local dest_conn = get_connection(action.dest_url)
       if src_conn ~= dest_conn then
@@ -305,25 +309,27 @@ M.perform_action = function(action, cb)
     local src_adapter = config.get_adapter_by_scheme(action.src_url)
     local dest_adapter = config.get_adapter_by_scheme(action.dest_url)
     if src_adapter == M and dest_adapter == M then
-      local src_res = parse_url(action.src_url)
-      local dest_res = parse_url(action.dest_url)
-      local src_conn = get_connection(action.src_url)
-      local dest_conn = get_connection(action.dest_url)
-      if src_conn.host ~= dest_conn.host then
+      local src_res = M.parse_url(action.src_url)
+      local dest_res = M.parse_url(action.dest_url)
+      if not url_hosts_equal(src_res, dest_res) then
         shell.run({ "scp", "-C", "-r", url_to_scp(src_res), url_to_scp(dest_res) }, cb)
+      else
+        local src_conn = get_connection(action.src_url)
+        src_conn:cp(src_res.path, dest_res.path, cb)
       end
-      src_conn:cp(src_res.path, dest_res.path, cb)
     else
       local src_arg
       local dest_arg
       if src_adapter == M then
-        src_arg = url_to_scp(parse_url(action.src_url))
+        src_arg = url_to_scp(M.parse_url(action.src_url))
         local _, path = util.parse_url(action.dest_url)
+        assert(path)
         dest_arg = fs.posix_to_os_path(path)
       else
         local _, path = util.parse_url(action.src_url)
+        assert(path)
         src_arg = fs.posix_to_os_path(path)
-        dest_arg = url_to_scp(parse_url(action.dest_url))
+        dest_arg = url_to_scp(M.parse_url(action.dest_url))
       end
       shell.run({ "scp", "-C", "-r", src_arg, dest_arg }, cb)
     end
@@ -332,19 +338,21 @@ M.perform_action = function(action, cb)
   end
 end
 
-M.supports_xfer = { files = true }
+M.supported_adapters_for_copy = { files = true }
 
 ---@param bufnr integer
 M.read_file = function(bufnr)
   loading.set_loading(bufnr, true)
   local bufname = vim.api.nvim_buf_get_name(bufnr)
-  local url = parse_url(bufname)
+  local url = M.parse_url(bufname)
   local scp_url = url_to_scp(url)
   local basename = pathutil.basename(bufname)
   local tmpdir = fs.join(vim.fn.stdpath("cache"), "oil")
   fs.mkdirp(tmpdir)
   local fd, tmpfile = vim.loop.fs_mkstemp(fs.join(tmpdir, "ssh_XXXXXX"))
-  vim.loop.fs_close(fd)
+  if fd then
+    vim.loop.fs_close(fd)
+  end
   local tmp_bufnr = vim.fn.bufadd(tmpfile)
 
   shell.run({ "scp", "-C", scp_url, tmpfile }, function(err)
@@ -362,7 +370,10 @@ M.read_file = function(bufnr)
       vim.api.nvim_buf_set_lines(bufnr, 0, 1, true, {})
     end
     vim.bo[bufnr].modified = false
-    vim.bo[bufnr].filetype = vim.filetype.match({ buf = bufnr, filename = basename })
+    local filetype = vim.filetype.match({ buf = bufnr, filename = basename })
+    if filetype then
+      vim.bo[bufnr].filetype = filetype
+    end
     vim.cmd.doautocmd({ args = { "BufReadPost", bufname }, mods = { silent = true } })
     vim.api.nvim_buf_delete(tmp_bufnr, { force = true })
   end)
@@ -371,23 +382,26 @@ end
 ---@param bufnr integer
 M.write_file = function(bufnr)
   local bufname = vim.api.nvim_buf_get_name(bufnr)
-  vim.bo[bufnr].modifiable = false
-  local url = parse_url(bufname)
+  local url = M.parse_url(bufname)
   local scp_url = url_to_scp(url)
   local tmpdir = fs.join(vim.fn.stdpath("cache"), "oil")
   local fd, tmpfile = vim.loop.fs_mkstemp(fs.join(tmpdir, "ssh_XXXXXXXX"))
-  vim.loop.fs_close(fd)
+  if fd then
+    vim.loop.fs_close(fd)
+  end
   vim.cmd.doautocmd({ args = { "BufWritePre", bufname }, mods = { silent = true } })
-  vim.cmd.write({ args = { tmpfile }, bang = true, mods = { silent = true } })
+  vim.bo[bufnr].modifiable = false
+  vim.cmd.write({ args = { tmpfile }, bang = true, mods = { silent = true, noautocmd = true } })
   local tmp_bufnr = vim.fn.bufadd(tmpfile)
 
   shell.run({ "scp", "-C", tmpfile, scp_url }, function(err)
+    vim.bo[bufnr].modifiable = true
     if err then
       vim.notify(string.format("Error writing file: %s", err), vim.log.levels.ERROR)
+    else
+      vim.bo[bufnr].modified = false
+      vim.cmd.doautocmd({ args = { "BufWritePost", bufname }, mods = { silent = true } })
     end
-    vim.bo[bufnr].modifiable = true
-    vim.bo[bufnr].modified = false
-    vim.cmd.doautocmd({ args = { "BufWritePost", bufname }, mods = { silent = true } })
     vim.loop.fs_unlink(tmpfile)
     vim.api.nvim_buf_delete(tmp_bufnr, { force = true })
   end)

@@ -150,6 +150,7 @@ M.rename_buffer = function(src_bufnr, dest_buf_name)
   -- rename logic. The only reason we can't use nvim_buf_set_name on files is because vim will
   -- think that the new buffer conflicts with the file next time it tries to save.
   if not vim.loop.fs_stat(dest_buf_name) then
+    ---@diagnostic disable-next-line: param-type-mismatch
     local altbuf = vim.fn.bufnr("#")
     -- This will fail if the dest buf name already exists
     local ok = pcall(vim.api.nvim_buf_set_name, src_bufnr, dest_buf_name)
@@ -218,6 +219,7 @@ local function get_possible_buffer_names_from_url(url)
   local fs = require("oil.fs")
   local scheme, path = M.parse_url(url)
   if config.adapters[scheme] == "files" then
+    assert(path)
     return { fs.posix_to_os_path(path) }
   end
   return { url }
@@ -347,6 +349,7 @@ M.add_title_to_win = function(winid, opts)
     local title = vim.api.nvim_buf_get_name(src_buf)
     local scheme, path = M.parse_url(title)
     if config.adapters[scheme] == "files" then
+      assert(path)
       local fs = require("oil.fs")
       title = vim.fn.fnamemodify(fs.posix_to_os_path(path), ":~")
     end
@@ -456,11 +459,17 @@ M.get_adapter_for_action = function(action)
     error("no adapter found")
   end
   if action.dest_url then
-    local dest_adapter = config.get_adapter_by_scheme(action.dest_url)
+    local dest_adapter = assert(config.get_adapter_by_scheme(action.dest_url))
     if adapter ~= dest_adapter then
-      if adapter.supports_xfer and adapter.supports_xfer[dest_adapter.name] then
+      if
+        adapter.supported_adapters_for_copy
+        and adapter.supported_adapters_for_copy[dest_adapter.name]
+      then
         return adapter
-      elseif dest_adapter.supports_xfer and dest_adapter.supports_xfer[adapter.name] then
+      elseif
+        dest_adapter.supported_adapters_for_copy
+        and dest_adapter.supported_adapters_for_copy[adapter.name]
+      then
         return dest_adapter
       else
         error(

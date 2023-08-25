@@ -6,13 +6,14 @@ local fs = require("oil.fs")
 local permissions = require("oil.adapters.files.permissions")
 local trash = require("oil.adapters.files.trash")
 local util = require("oil.util")
+local uv = vim.uv or vim.loop
 local M = {}
 
 local FIELD_NAME = constants.FIELD_NAME
 local FIELD_META = constants.FIELD_META
 
 local function read_link_data(path, cb)
-  vim.loop.fs_readlink(
+  uv.fs_readlink(
     path,
     vim.schedule_wrap(function(link_err, link)
       if link_err then
@@ -22,7 +23,7 @@ local function read_link_data(path, cb)
         if not fs.is_absolute(link) then
           stat_path = fs.join(vim.fn.fnamemodify(path, ":h"), link)
         end
-        vim.loop.fs_stat(stat_path, function(stat_err, stat)
+        uv.fs_stat(stat_path, function(stat_err, stat)
           cb(nil, link, stat)
         end)
       end
@@ -46,8 +47,9 @@ local file_columns = {}
 local fs_stat_meta_fields = {
   stat = function(parent_url, entry, cb)
     local _, path = util.parse_url(parent_url)
+    assert(path)
     local dir = fs.posix_to_os_path(path)
-    vim.loop.fs_stat(fs.join(dir, entry[FIELD_NAME]), cb)
+    uv.fs_stat(fs.join(dir, entry[FIELD_NAME]), cb)
   end,
 }
 
@@ -108,6 +110,7 @@ if not fs.is_windows then
 
     render_action = function(action)
       local _, path = util.parse_url(action.url)
+      assert(path)
       return string.format(
         "CHMOD %s %s",
         permissions.mode_to_octal_str(action.value),
@@ -117,15 +120,17 @@ if not fs.is_windows then
 
     perform_action = function(action, callback)
       local _, path = util.parse_url(action.url)
+      assert(path)
       path = fs.posix_to_os_path(path)
-      vim.loop.fs_stat(path, function(err, stat)
+      uv.fs_stat(path, function(err, stat)
         if err then
           return callback(err)
         end
+        assert(stat)
         -- We are only changing the lower 12 bits of the mode
         local mask = bit.bnot(bit.lshift(1, 12) - 1)
         local old_mode = bit.band(stat.mode, mask)
-        vim.loop.fs_chmod(path, bit.bor(old_mode, action.value), callback)
+        uv.fs_chmod(path, bit.bor(old_mode, action.value), callback)
       end)
     end,
   }
@@ -178,10 +183,11 @@ end
 ---@param callback fun(url: string)
 M.normalize_url = function(url, callback)
   local scheme, path = util.parse_url(url)
+  assert(path)
   local os_path = vim.fn.fnamemodify(fs.posix_to_os_path(path), ":p")
-  vim.loop.fs_realpath(os_path, function(err, new_os_path)
+  uv.fs_realpath(os_path, function(err, new_os_path)
     local realpath = new_os_path or os_path
-    vim.loop.fs_stat(
+    uv.fs_stat(
       realpath,
       vim.schedule_wrap(function(stat_err, stat)
         local is_directory
@@ -207,19 +213,15 @@ end
 
 ---@param url string
 ---@param column_defs string[]
----@param callback fun(err: nil|string, entries: nil|oil.InternalEntry[])
-M.list = function(url, column_defs, callback)
+---@param cb fun(err?: string, entries?: oil.InternalEntry[], fetch_more?: fun())
+M.list = function(url, column_defs, cb)
   local _, path = util.parse_url(url)
+  assert(path)
   local dir = fs.posix_to_os_path(path)
   local fetch_meta = columns.get_metadata_fetcher(M, column_defs)
-  cache.begin_update_url(url)
-  local function cb(err, data)
-    if err or not data then
-      cache.end_update_url(url)
-    end
-    callback(err, data)
-  end
-  vim.loop.fs_opendir(dir, function(open_err, fd)
+
+  ---@diagnostic disable-next-line: param-type-mismatch
+  uv.fs_opendir(dir, function(open_err, fd)
     if open_err then
       if open_err:match("^ENOENT: no such file or directory") then
         -- If the directory doesn't exist, treat the list as a success. We will be able to traverse
@@ -230,14 +232,11 @@ M.list = function(url, column_defs, callback)
       end
     end
     local read_next
-    read_next = function(read_err)
-      if read_err then
-        cb(read_err)
-        return
-      end
-      vim.loop.fs_readdir(fd, function(err, entries)
+    read_next = function()
+      uv.fs_readdir(fd, function(err, entries)
+        local internal_entries = {}
         if err then
-          vim.loop.fs_closedir(fd, function()
+          uv.fs_closedir(fd, function()
             cb(err)
           end)
           return
@@ -246,8 +245,7 @@ M.list = function(url, column_defs, callback)
             if inner_err then
               cb(inner_err)
             else
-              cb(nil, true)
-              read_next()
+              cb(nil, internal_entries, read_next)
             end
           end)
           for _, entry in ipairs(entries) do
@@ -256,6 +254,7 @@ M.list = function(url, column_defs, callback)
               if err then
                 poll(meta_err)
               else
+                table.insert(internal_entries, cache_entry)
                 local meta = cache_entry[FIELD_META]
                 -- Make sure we always get fs_stat info for links
                 if entry.type == "link" then
@@ -269,19 +268,17 @@ M.list = function(url, column_defs, callback)
                       end
                       meta.link = link
                       meta.link_stat = link_stat
-                      cache.store_entry(url, cache_entry)
                       poll()
                     end
                   end)
                 else
-                  cache.store_entry(url, cache_entry)
                   poll()
                 end
               end
             end)
           end
         else
-          vim.loop.fs_closedir(fd, function(close_err)
+          uv.fs_closedir(fd, function(close_err)
             if close_err then
               cb(close_err)
             else
@@ -292,7 +289,8 @@ M.list = function(url, column_defs, callback)
       end)
     end
     read_next()
-  end, 100) -- TODO do some testing for this
+    ---@diagnostic disable-next-line: param-type-mismatch
+  end, 10000)
 end
 
 ---@param bufnr integer
@@ -300,8 +298,9 @@ end
 M.is_modifiable = function(bufnr)
   local bufname = vim.api.nvim_buf_get_name(bufnr)
   local _, path = util.parse_url(bufname)
+  assert(path)
   local dir = fs.posix_to_os_path(path)
-  local stat = vim.loop.fs_stat(dir)
+  local stat = uv.fs_stat(dir)
   if not stat then
     return true
   end
@@ -311,8 +310,8 @@ M.is_modifiable = function(bufnr)
     return true
   end
 
-  local uid = vim.loop.getuid()
-  local gid = vim.loop.getgid()
+  local uid = uv.getuid()
+  local gid = uv.getgid()
   local rwx
   if uid == stat.uid then
     rwx = bit.rshift(stat.mode, 6)
@@ -329,6 +328,7 @@ end
 M.render_action = function(action)
   if action.type == "create" then
     local _, path = util.parse_url(action.url)
+    assert(path)
     local ret = string.format("CREATE %s", M.to_short_os_path(path, action.entry_type))
     if action.link then
       ret = ret .. " -> " .. fs.posix_to_os_path(action.link)
@@ -336,12 +336,15 @@ M.render_action = function(action)
     return ret
   elseif action.type == "delete" then
     local _, path = util.parse_url(action.url)
+    assert(path)
     return string.format("DELETE %s", M.to_short_os_path(path, action.entry_type))
   elseif action.type == "move" or action.type == "copy" then
     local dest_adapter = config.get_adapter_by_scheme(action.dest_url)
     if dest_adapter == M then
       local _, src_path = util.parse_url(action.src_url)
+      assert(src_path)
       local _, dest_path = util.parse_url(action.dest_url)
+      assert(dest_path)
       return string.format(
         "  %s %s -> %s",
         action.type:upper(),
@@ -349,7 +352,7 @@ M.render_action = function(action)
         M.to_short_os_path(dest_path, action.entry_type)
       )
     else
-      -- We should never hit this because we don't implement supports_xfer
+      -- We should never hit this because we don't implement supported_adapters_for_copy
       error("files adapter doesn't support cross-adapter move/copy")
     end
   else
@@ -362,9 +365,10 @@ end
 M.perform_action = function(action, cb)
   if action.type == "create" then
     local _, path = util.parse_url(action.url)
+    assert(path)
     path = fs.posix_to_os_path(path)
     if action.entry_type == "directory" then
-      vim.loop.fs_mkdir(path, 493, function(err)
+      uv.fs_mkdir(path, 493, function(err)
         -- Ignore if the directory already exists
         if not err or err:match("^EEXIST:") then
           cb()
@@ -381,12 +385,14 @@ M.perform_action = function(action, cb)
           junction = false,
         }
       end
-      vim.loop.fs_symlink(target, path, flags, cb)
+      ---@diagnostic disable-next-line: param-type-mismatch
+      uv.fs_symlink(target, path, flags, cb)
     else
       fs.touch(path, cb)
     end
   elseif action.type == "delete" then
     local _, path = util.parse_url(action.url)
+    assert(path)
     path = fs.posix_to_os_path(path)
     if config.delete_to_trash then
       trash.recursive_delete(path, cb)
@@ -397,24 +403,28 @@ M.perform_action = function(action, cb)
     local dest_adapter = config.get_adapter_by_scheme(action.dest_url)
     if dest_adapter == M then
       local _, src_path = util.parse_url(action.src_url)
+      assert(src_path)
       local _, dest_path = util.parse_url(action.dest_url)
+      assert(dest_path)
       src_path = fs.posix_to_os_path(src_path)
       dest_path = fs.posix_to_os_path(dest_path)
       fs.recursive_move(action.entry_type, src_path, dest_path, vim.schedule_wrap(cb))
     else
-      -- We should never hit this because we don't implement supports_xfer
+      -- We should never hit this because we don't implement supported_adapters_for_copy
       cb("files adapter doesn't support cross-adapter move")
     end
   elseif action.type == "copy" then
     local dest_adapter = config.get_adapter_by_scheme(action.dest_url)
     if dest_adapter == M then
       local _, src_path = util.parse_url(action.src_url)
+      assert(src_path)
       local _, dest_path = util.parse_url(action.dest_url)
+      assert(dest_path)
       src_path = fs.posix_to_os_path(src_path)
       dest_path = fs.posix_to_os_path(dest_path)
       fs.recursive_copy(action.entry_type, src_path, dest_path, cb)
     else
-      -- We should never hit this because we don't implement supports_xfer
+      -- We should never hit this because we don't implement supported_adapters_for_copy
       cb("files adapter doesn't support cross-adapter copy")
     end
   else

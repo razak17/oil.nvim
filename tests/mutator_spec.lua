@@ -4,6 +4,7 @@ local constants = require("oil.constants")
 local mutator = require("oil.mutator")
 local parser = require("oil.mutator.parser")
 local test_adapter = require("oil.adapters.test")
+local test_util = require("tests.test_util")
 local util = require("oil.util")
 local view = require("oil.view")
 
@@ -22,7 +23,9 @@ a.describe("mutator", function()
     for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
       vim.api.nvim_buf_delete(bufnr, { force = true })
     end
+    test_adapter.test_clear()
     cache.clear_everything()
+    test_util.reset_editor()
   end)
 
   describe("parser", function()
@@ -60,7 +63,7 @@ a.describe("mutator", function()
     end)
 
     it("detects deleted files", function()
-      local file = cache.create_and_store_entry("oil-test:///foo/", "a.txt", "file")
+      local file = test_adapter.test_set("/foo/a.txt", "file")
       vim.cmd.edit({ args = { "oil-test:///foo/" } })
       local bufnr = vim.api.nvim_get_current_buf()
       set_lines(bufnr, {})
@@ -71,7 +74,7 @@ a.describe("mutator", function()
     end)
 
     it("detects deleted directories", function()
-      local dir = cache.create_and_store_entry("oil-test:///foo/", "bar", "directory")
+      local dir = test_adapter.test_set("/foo/bar", "directory")
       vim.cmd.edit({ args = { "oil-test:///foo/" } })
       local bufnr = vim.api.nvim_get_current_buf()
       set_lines(bufnr, {})
@@ -82,7 +85,7 @@ a.describe("mutator", function()
     end)
 
     it("detects deleted links", function()
-      local file = cache.create_and_store_entry("oil-test:///foo/", "a.txt", "link")
+      local file = test_adapter.test_set("/foo/a.txt", "link")
       file[FIELD_META] = { link = "b.txt" }
       vim.cmd.edit({ args = { "oil-test:///foo/" } })
       local bufnr = vim.api.nvim_get_current_buf()
@@ -94,7 +97,7 @@ a.describe("mutator", function()
     end)
 
     it("ignores empty lines", function()
-      local file = cache.create_and_store_entry("oil-test:///foo/", "a.txt", "file")
+      local file = test_adapter.test_set("/foo/a.txt", "file")
       vim.cmd.edit({ args = { "oil-test:///foo/" } })
       local bufnr = vim.api.nvim_get_current_buf()
       local cols = view.format_entry_cols(file, {}, {}, test_adapter)
@@ -156,7 +159,7 @@ a.describe("mutator", function()
     end)
 
     it("errors on duplicate names for existing files", function()
-      local file = cache.create_and_store_entry("oil-test:///foo/", "a.txt", "file")
+      local file = test_adapter.test_set("/foo/a.txt", "file")
       vim.cmd.edit({ args = { "oil-test:///foo/" } })
       local bufnr = vim.api.nvim_get_current_buf()
       set_lines(bufnr, {
@@ -184,7 +187,7 @@ a.describe("mutator", function()
     end)
 
     it("parses a rename as a delete + new", function()
-      local file = cache.create_and_store_entry("oil-test:///foo/", "a.txt", "file")
+      local file = test_adapter.test_set("/foo/a.txt", "file")
       vim.cmd.edit({ args = { "oil-test:///foo/" } })
       local bufnr = vim.api.nvim_get_current_buf()
       set_lines(bufnr, {
@@ -198,8 +201,8 @@ a.describe("mutator", function()
     end)
 
     it("detects renamed files that conflict", function()
-      local afile = cache.create_and_store_entry("oil-test:///foo/", "a.txt", "file")
-      local bfile = cache.create_and_store_entry("oil-test:///foo/", "b.txt", "file")
+      local afile = test_adapter.test_set("/foo/a.txt", "file")
+      local bfile = test_adapter.test_set("/foo/b.txt", "file")
       vim.cmd.edit({ args = { "oil-test:///foo/" } })
       local bufnr = vim.api.nvim_get_current_buf()
       set_lines(bufnr, {
@@ -226,7 +229,7 @@ a.describe("mutator", function()
     end)
 
     it("views link targets with trailing slashes as the same", function()
-      local file = cache.create_and_store_entry("oil-test:///foo/", "mydir", "link")
+      local file = test_adapter.test_set("/foo/mydir", "link")
       file[FIELD_META] = { link = "dir/" }
       vim.cmd.edit({ args = { "oil-test:///foo/" } })
       local bufnr = vim.api.nvim_get_current_buf()
@@ -267,7 +270,7 @@ a.describe("mutator", function()
     end)
 
     it("constructs DELETE actions", function()
-      local file = cache.create_and_store_entry("oil-test:///foo/", "a.txt", "file")
+      local file = test_adapter.test_set("/foo/a.txt", "file")
       vim.cmd.edit({ args = { "oil-test:///foo/" } })
       local bufnr = vim.api.nvim_get_current_buf()
       local diffs = {
@@ -286,7 +289,7 @@ a.describe("mutator", function()
     end)
 
     it("constructs COPY actions", function()
-      local file = cache.create_and_store_entry("oil-test:///foo/", "a.txt", "file")
+      local file = test_adapter.test_set("/foo/a.txt", "file")
       vim.cmd.edit({ args = { "oil-test:///foo/" } })
       local bufnr = vim.api.nvim_get_current_buf()
       local diffs = {
@@ -306,7 +309,7 @@ a.describe("mutator", function()
     end)
 
     it("constructs MOVE actions", function()
-      local file = cache.create_and_store_entry("oil-test:///foo/", "a.txt", "file")
+      local file = test_adapter.test_set("/foo/a.txt", "file")
       vim.cmd.edit({ args = { "oil-test:///foo/" } })
       local bufnr = vim.api.nvim_get_current_buf()
       local diffs = {
@@ -327,7 +330,7 @@ a.describe("mutator", function()
     end)
 
     it("correctly orders MOVE + CREATE", function()
-      local file = cache.create_and_store_entry("oil-test:///", "a.txt", "file")
+      local file = test_adapter.test_set("/a.txt", "file")
       vim.cmd.edit({ args = { "oil-test:///" } })
       local bufnr = vim.api.nvim_get_current_buf()
       local diffs = {
@@ -354,8 +357,8 @@ a.describe("mutator", function()
     end)
 
     it("resolves MOVE loops", function()
-      local afile = cache.create_and_store_entry("oil-test:///", "a.txt", "file")
-      local bfile = cache.create_and_store_entry("oil-test:///", "b.txt", "file")
+      local afile = test_adapter.test_set("/a.txt", "file")
+      local bfile = test_adapter.test_set("/b.txt", "file")
       vim.cmd.edit({ args = { "oil-test:///" } })
       local bufnr = vim.api.nvim_get_current_buf()
       local diffs = {
@@ -554,7 +557,7 @@ a.describe("mutator", function()
     end)
 
     a.it("deletes entries", function()
-      local file = cache.create_and_store_entry("oil-test:///", "a.txt", "file")
+      local file = test_adapter.test_set("/a.txt", "file")
       local actions = {
         { type = "delete", url = "oil-test:///a.txt", entry_type = "file" },
       }
@@ -568,7 +571,7 @@ a.describe("mutator", function()
     end)
 
     a.it("moves entries", function()
-      local file = cache.create_and_store_entry("oil-test:///", "a.txt", "file")
+      local file = test_adapter.test_set("/a.txt", "file")
       local actions = {
         {
           type = "move",
@@ -592,7 +595,7 @@ a.describe("mutator", function()
     end)
 
     a.it("copies entries", function()
-      local file = cache.create_and_store_entry("oil-test:///", "a.txt", "file")
+      local file = test_adapter.test_set("/a.txt", "file")
       local actions = {
         {
           type = "copy",

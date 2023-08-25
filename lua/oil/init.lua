@@ -1,26 +1,29 @@
 local M = {}
 
----@class oil.Entry
+---@class (exact) oil.Entry
 ---@field name string
 ---@field type oil.EntryType
 ---@field id nil|integer Will be nil if it hasn't been persisted to disk yet
 ---@field parsed_name nil|string
 
----@alias oil.EntryType "file"|"directory"|"socket"|"link"
+---@alias oil.EntryType "file"|"directory"|"socket"|"link"|"fifo"
 ---@alias oil.TextChunk string|string[]
 
----@class oil.Adapter
----@field name string
----@field list fun(path: string, cb: fun(err: nil|string, entries: nil|oil.InternalEntry[]))
----@field is_modifiable fun(bufnr: integer): boolean
----@field get_column fun(name: string): nil|oil.ColumnDefinition
----@field normalize_url fun(url: string, callback: fun(url: string))
----@field get_parent nil|fun(bufname: string): string
----@field supports_xfer nil|table<string, boolean>
----@field render_action nil|fun(action: oil.Action): string
----@field perform_action nil|fun(action: oil.Action, cb: fun(err: nil|string))
----@field read_file fun(bufnr: integer)
----@field write_file fun(bufnr: integer)
+---@class (exact) oil.Adapter
+---@field name string The unique name of the adapter (this will be set automatically)
+---@field list fun(path: string, column_defs: string[], cb: fun(err?: string, entries?: oil.InternalEntry[], fetch_more?: fun())) Async function to list a directory.
+---@field is_modifiable fun(bufnr: integer): boolean Return true if this directory is modifiable (allows for directories with read-only permissions).
+---@field get_column fun(name: string): nil|oil.ColumnDefinition If the adapter has any adapter-specific columns, return them when fetched by name.
+---@field normalize_url fun(url: string, callback: fun(url: string)) Before oil opens a url it will be normalized. This allows for link following, path normalizing, and converting an oil file url to the actual path of a file.
+---@field render_action? fun(action: oil.Action): string Render a mutation action for display in the preview window. Only needed if adapter is modifiable.
+---@field perform_action? fun(action: oil.Action, cb: fun(err: nil|string)) Perform a mutation action. Only needed if adapter is modifiable.
+---@field read_file? fun(bufnr: integer) Used for adapters that deal with remote/virtual files. Read the contents of the file into a buffer.
+---@field write_file? fun(bufnr: integer) Used for adapters that deal with remote/virtual files. Write the contents of a buffer to the destination.
+---@field supported_adapters_for_copy? table<string, boolean> Mapping of adapter name to true for all other adapters that can be used as a src or dest for move/copy actions.
+
+-- TODO remove after https://github.com/folke/neodev.nvim/pull/163 lands
+---@diagnostic disable: undefined-field
+---@diagnostic disable: inject-field
 
 ---Get the entry on a specific line (1-indexed)
 ---@param bufnr integer
@@ -119,6 +122,7 @@ M.empty_trash = function()
     return
   end
   local _, path = util.parse_url(trash_url)
+  assert(path)
   local dir = fs.posix_to_os_path(path)
   if vim.fn.isdirectory(dir) == 1 then
     fs.recursive_delete("directory", dir, function(err)
@@ -157,6 +161,7 @@ M.get_current_dir = function()
   local util = require("oil.util")
   local scheme, path = util.parse_url(vim.api.nvim_buf_get_name(0))
   if config.adapters[scheme] == "files" then
+    assert(path)
     return fs.posix_to_os_path(path)
   end
 end
@@ -170,6 +175,9 @@ M.get_url_for_path = function(dir)
   local config = require("oil.config")
   local fs = require("oil.fs")
   local util = require("oil.util")
+  if vim.bo.filetype == "netrw" and not dir then
+    dir = vim.b.netrw_curdir
+  end
   if dir then
     local scheme = util.parse_url(dir)
     if scheme then
@@ -206,9 +214,11 @@ M.get_buffer_parent_url = function(bufname)
     local parent_url = util.addslash(scheme .. parent)
     return parent_url, basename
   else
+    assert(path)
     -- TODO maybe we should remove this special case and turn it into a config
     if scheme == "term://" then
-      path = vim.fn.expand(path:match("^(.*)//"))
+      ---@type string
+      path = vim.fn.expand(path:match("^(.*)//")) ---@diagnostic disable-line: assign-type-mismatch
       return config.adapter_to_scheme.files .. util.addslash(path)
     end
 
@@ -307,6 +317,7 @@ M.open_float = function(dir)
       local title = vim.api.nvim_buf_get_name(src_buf)
       local scheme, path = util.parse_url(title)
       if config.adapters[scheme] == "files" then
+        assert(path)
         local fs = require("oil.fs")
         title = vim.fn.fnamemodify(fs.posix_to_os_path(path), ":~")
       end
@@ -598,23 +609,25 @@ M.select = function(opts, callback)
 end
 
 ---@param bufnr integer
+---@return boolean
 local function maybe_hijack_directory_buffer(bufnr)
   local config = require("oil.config")
   local util = require("oil.util")
   if not config.default_file_explorer then
-    return
+    return false
   end
   local bufname = vim.api.nvim_buf_get_name(bufnr)
   if bufname == "" then
-    return
+    return false
   end
   if util.parse_url(bufname) or vim.fn.isdirectory(bufname) == 0 then
-    return
+    return false
   end
-  util.rename_buffer(
+  local replaced = util.rename_buffer(
     bufnr,
     util.addslash(config.adapter_to_scheme.files .. vim.fn.fnamemodify(bufname, ":p"))
   )
+  return not replaced
 end
 
 ---@private
@@ -624,6 +637,11 @@ M._get_highlights = function()
       name = "OilDir",
       link = "Directory",
       desc = "Directories in an oil buffer",
+    },
+    {
+      name = "OilDirIcon",
+      link = "OilDir",
+      desc = "Icon for directories",
     },
     {
       name = "OilSocket",
@@ -737,7 +755,7 @@ local function load_oil_buffer(bufnr)
     util.rename_buffer(bufnr, bufname)
   end
 
-  local adapter = config.get_adapter_by_scheme(scheme)
+  local adapter = assert(config.get_adapter_by_scheme(scheme))
 
   if vim.endswith(bufname, "/") then
     -- This is a small quality-of-life thing. If the buffer name ends with a `/`, we know it's a
@@ -825,8 +843,13 @@ M.setup = function(opts)
   end, { desc = "Open oil file browser on a directory", nargs = "*", complete = "dir" })
   local aug = vim.api.nvim_create_augroup("Oil", {})
 
-  if config.default_file_explorer and vim.fn.exists("#FileExplorer") then
-    vim.api.nvim_create_augroup("FileExplorer", { clear = true })
+  if config.default_file_explorer then
+    vim.g.loaded_netrw = 1
+    vim.g.loaded_netrwPlugin = 1
+    -- If netrw was already loaded, clear this augroup
+    if vim.fn.exists("#FileExplorer") then
+      vim.api.nvim_create_augroup("FileExplorer", { clear = true })
+    end
   end
 
   local patterns = {}
@@ -872,6 +895,7 @@ M.setup = function(opts)
         vim.cmd.doautocmd({ args = { "BufWritePost", params.file }, mods = { silent = true } })
       else
         local adapter = config.get_adapter_by_scheme(bufname)
+        assert(adapter)
         adapter.write_file(params.buf)
       end
     end,
@@ -885,6 +909,7 @@ M.setup = function(opts)
       if not util.is_oil_bufnr(0) then
         vim.w.oil_original_buffer = vim.api.nvim_get_current_buf()
         vim.w.oil_original_view = vim.fn.winsaveview()
+        ---@diagnostic disable-next-line: param-type-mismatch
         vim.w.oil_original_alternate = vim.fn.bufnr("#")
       end
     end,
@@ -939,20 +964,6 @@ M.setup = function(opts)
       callback = function()
         vim.notify(
           "If you are trying to browse using Oil, use oil-ssh:// instead of scp://\nSet `silence_scp_warning = true` in oil.setup() to disable this message.\nSee https://github.com/stevearc/oil.nvim/issues/27 for more information.",
-          vim.log.levels.WARN
-        )
-      end,
-    })
-  end
-  if vim.g.loaded_netrwPlugin ~= 1 and not config.silence_netrw_warning then
-    vim.api.nvim_create_autocmd("FileType", {
-      desc = "Inform user how to disable netrw",
-      group = aug,
-      pattern = "netrw",
-      once = true,
-      callback = function()
-        vim.notify(
-          "If you expected an Oil buffer here, you may want to disable netrw (:help netrw-noload)\nSet `silence_netrw_warning = true` in oil.setup() to disable this message.",
           vim.log.levels.WARN
         )
       end,
@@ -1030,7 +1041,12 @@ M.setup = function(opts)
     end,
   })
 
-  maybe_hijack_directory_buffer(0)
+  local bufnr = vim.api.nvim_get_current_buf()
+  if maybe_hijack_directory_buffer(bufnr) and vim.v.vim_did_enter == 1 then
+    -- manually call load on a hijacked directory buffer if vim has already entered
+    -- (the BufReadCmd will not trigger)
+    load_oil_buffer(bufnr)
+  end
 end
 
 return M
