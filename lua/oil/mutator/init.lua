@@ -191,7 +191,7 @@ M.enforce_action_order = function(actions)
   local function get_deps(action)
     local ret = {}
     if action.type == "delete" then
-      return ret
+      src_trie:accum_children_of(action.url, ret)
     elseif action.type == "create" then
       -- Finish operating on parents first
       -- e.g. NEW /a BEFORE NEW /a/b

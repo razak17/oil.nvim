@@ -148,14 +148,12 @@ require("oil").setup({
     spell = false,
     list = false,
     conceallevel = 3,
-    concealcursor = "n",
+    concealcursor = "nvic",
   },
-  -- Restore window options to previous values when leaving an oil buffer
-  restore_win_options = true,
+  -- Send deleted files to the trash instead of permanently deleting them (:help oil-trash)
+  delete_to_trash = false,
   -- Skip the confirmation popup for simple operations
   skip_confirm_for_simple_edits = false,
-  -- Deleted files will be removed with the trash_command (below).
-  delete_to_trash = false,
   -- Change this to customize the command used when deleting to trash
   trash_command = "trash-put",
   -- Selecting a new/moved/renamed file or directory will prompt you to save changes first
@@ -179,6 +177,7 @@ require("oil").setup({
     ["_"] = "actions.open_cwd",
     ["`"] = "actions.cd",
     ["~"] = "actions.tcd",
+    ["gs"] = "actions.change_sort",
     ["g."] = "actions.toggle_hidden",
   },
   -- Set to false to disable all of the above keymaps
@@ -194,6 +193,12 @@ require("oil").setup({
     is_always_hidden = function(name, bufnr)
       return false
     end,
+    sort = {
+      -- sort order can be "asc" or "desc"
+      -- see :help oil-columns to see which columns are sortable
+      { "type", "asc" },
+      { "name", "asc" },
+    },
   },
   -- Configuration for the floating window in oil.open_float
   float = {
@@ -203,7 +208,7 @@ require("oil").setup({
     max_height = 0,
     border = "rounded",
     win_options = {
-      winblend = 10,
+      winblend = 0,
     },
     -- This is the config that will be passed to nvim_open_win.
     -- Change values here to customize the layout
@@ -277,6 +282,7 @@ Note that at the moment the ssh adapter does not support Windows machines, and i
 - [get_cursor_entry()](doc/api.md#get_cursor_entry)
 - [discard_all_changes()](doc/api.md#discard_all_changes)
 - [set_columns(cols)](doc/api.md#set_columnscols)
+- [set_sort(sort)](doc/api.md#set_sortsort)
 - [set_is_hidden_file(is_hidden_file)](doc/api.md#set_is_hidden_fileis_hidden_file)
 - [toggle_hidden()](doc/api.md#toggle_hidden)
 - [get_current_dir()](doc/api.md#get_current_dir)

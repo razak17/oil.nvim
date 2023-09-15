@@ -3,16 +3,16 @@
 --------------------------------------------------------------------------------
 CONTENTS                                                            *oil-contents*
 
-  1. Options.....................................................|oil-options|
-  2. Api.............................................................|oil-api|
-  3. Columns.....................................................|oil-columns|
-  4. Actions.....................................................|oil-actions|
-  5. Highlights...............................................|oil-highlights|
+  1. Options                                                     |oil-options|
+  2. Api                                                             |oil-api|
+  3. Columns                                                     |oil-columns|
+  4. Actions                                                     |oil-actions|
+  5. Highlights                                               |oil-highlights|
 
 --------------------------------------------------------------------------------
 OPTIONS                                                              *oil-options*
 
->
+>lua
     require("oil").setup({
       -- Oil will take over directory buffers (e.g. `vim .` or `:e src/`)
       -- Set to false if you still want to use netrw.
@@ -39,14 +39,12 @@ OPTIONS                                                              *oil-option
         spell = false,
         list = false,
         conceallevel = 3,
-        concealcursor = "n",
+        concealcursor = "nvic",
       },
-      -- Restore window options to previous values when leaving an oil buffer
-      restore_win_options = true,
+      -- Send deleted files to the trash instead of permanently deleting them (:help oil-trash)
+      delete_to_trash = false,
       -- Skip the confirmation popup for simple operations
       skip_confirm_for_simple_edits = false,
-      -- Deleted files will be removed with the trash_command (below).
-      delete_to_trash = false,
       -- Change this to customize the command used when deleting to trash
       trash_command = "trash-put",
       -- Selecting a new/moved/renamed file or directory will prompt you to save changes first
@@ -70,6 +68,7 @@ OPTIONS                                                              *oil-option
         ["_"] = "actions.open_cwd",
         ["`"] = "actions.cd",
         ["~"] = "actions.tcd",
+        ["gs"] = "actions.change_sort",
         ["g."] = "actions.toggle_hidden",
       },
       -- Set to false to disable all of the above keymaps
@@ -85,6 +84,12 @@ OPTIONS                                                              *oil-option
         is_always_hidden = function(name, bufnr)
           return false
         end,
+        sort = {
+          -- sort order can be "asc" or "desc"
+          -- see :help oil-columns to see which columns are sortable
+          { "type", "asc" },
+          { "name", "asc" },
+        },
       },
       -- Configuration for the floating window in oil.open_float
       float = {
@@ -94,7 +99,7 @@ OPTIONS                                                              *oil-option
         max_height = 0,
         border = "rounded",
         win_options = {
-          winblend = 10,
+          winblend = 0,
         },
         -- This is the config that will be passed to nvim_open_win.
         -- Change values here to customize the layout
@@ -165,6 +170,12 @@ set_columns({cols})                                              *oil.set_column
 
     Parameters:
       {cols} `oil.ColumnSpec[]`
+
+set_sort({sort})                                                    *oil.set_sort*
+    Change the sort order for oil
+
+    Parameters:
+      {sort} `string[]` []
 
 set_is_hidden_file({is_hidden_file})                      *oil.set_is_hidden_file*
     Change how oil determines if the file is hidden
@@ -244,6 +255,7 @@ or as a table to pass parameters (e.g. `{"size", highlight = "Special"}`)
 
 type                                                                 *column-type*
     Adapters: *
+    Sortable: this column can be used in view_props.sort
     The type of the entry (file, directory, link, etc)
 
     Parameters:
@@ -266,6 +278,7 @@ icon                                                                 *column-ico
 
 size                                                                 *column-size*
     Adapters: files, ssh
+    Sortable: this column can be used in view_props.sort
     The size of the file
 
     Parameters:
@@ -283,6 +296,7 @@ permissions                                                   *column-permission
 
 ctime                                                               *column-ctime*
     Adapters: files
+    Sortable: this column can be used in view_props.sort
     Change timestamp of the file
 
     Parameters:
@@ -292,6 +306,7 @@ ctime                                                               *column-ctim
 
 mtime                                                               *column-mtime*
     Adapters: files
+    Sortable: this column can be used in view_props.sort
     Last modified time of the file
 
     Parameters:
@@ -301,6 +316,7 @@ mtime                                                               *column-mtim
 
 atime                                                               *column-atime*
     Adapters: files
+    Sortable: this column can be used in view_props.sort
     Last access time of the file
 
     Parameters:
@@ -310,6 +326,7 @@ atime                                                               *column-atim
 
 birthtime                                                       *column-birthtime*
     Adapters: files
+    Sortable: this column can be used in view_props.sort
     The time the file was created
 
     Parameters:
@@ -324,6 +341,9 @@ These are actions that can be used in the `keymaps` section of config options.
 
 cd                                                                    *actions.cd*
     :cd to the current oil directory
+
+change_sort                                                  *actions.change_sort*
+    Change the sort order
 
 close                                                              *actions.close*
     Close oil and restore original buffer

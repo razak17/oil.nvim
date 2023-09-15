@@ -100,6 +100,17 @@ M.set_columns = function(cols)
   end
 end
 
+M.set_sort = function(new_sort)
+  local any_modified = are_any_modified()
+  if any_modified then
+    vim.notify("Cannot change sorting when you have unsaved changes", vim.log.levels.WARN)
+  else
+    config.view_options.sort = new_sort
+    -- TODO only refetch if we don't have all the necessary data for the columns
+    M.rerender_all_oil_buffers({ refetch = true })
+  end
+end
+
 -- List of bufnrs
 local session = {}
 
@@ -160,25 +171,7 @@ end
 M.set_win_options = function()
   local winid = vim.api.nvim_get_current_win()
   for k, v in pairs(config.win_options) do
-    if config.restore_win_options then
-      local varname = "_oil_" .. k
-      if not pcall(vim.api.nvim_win_get_var, winid, varname) then
-        local prev_value = vim.wo[k]
-        vim.api.nvim_win_set_var(winid, varname, prev_value)
-      end
-    end
     vim.api.nvim_set_option_value(k, v, { scope = "local", win = winid })
-  end
-end
-
-M.restore_win_options = function()
-  local winid = vim.api.nvim_get_current_win()
-  for k in pairs(config.win_options) do
-    local varname = "_oil_" .. k
-    local has_opt, opt = pcall(vim.api.nvim_win_get_var, winid, varname)
-    if has_opt then
-      vim.api.nvim_set_option_value(k, opt, { scope = "local", win = winid })
-    end
   end
 end
 
@@ -217,6 +210,22 @@ M.delete_hidden_buffers = function()
     vim.api.nvim_buf_delete(bufnr, { force = true })
   end
   cache.clear_everything()
+end
+
+---@param adapter oil.Adapter
+---@param ranges table<string, integer[]>
+---@return integer
+local function get_first_mutable_column_col(adapter, ranges)
+  local min_col = ranges.name[1]
+  for col_name, start_len in pairs(ranges) do
+    local start = start_len[1]
+    local col_spec = columns.get_column(adapter, col_name)
+    local is_col_mutable = col_spec and col_spec.perform_action ~= nil
+    if is_col_mutable and start < min_col then
+      min_col = start
+    end
+  end
+  return min_col
 end
 
 ---@param bufnr integer
@@ -297,8 +306,8 @@ M.initialize = function(bufnr)
         local line = vim.api.nvim_buf_get_lines(bufnr, cur[1] - 1, cur[1], true)[1]
         local column_defs = columns.get_supported_columns(adapter)
         local result = parser.parse_line(adapter, line, column_defs)
-        if result and result.data then
-          local min_col = result.ranges.id[2] + 1
+        if result and result.ranges then
+          local min_col = get_first_mutable_column_col(adapter, result.ranges)
           if cur[2] < min_col then
             vim.api.nvim_win_set_cursor(0, { cur[1], min_col })
           end
@@ -351,17 +360,46 @@ M.initialize = function(bufnr)
   keymap_util.set_keymaps("", config.keymaps, bufnr)
 end
 
----@param entry oil.InternalEntry
----@return boolean
-local function is_entry_directory(entry)
-  local type = entry[FIELD_TYPE]
-  if type == "directory" then
-    return true
-  elseif type == "link" then
-    local meta = entry[FIELD_META]
-    return meta and meta.link_stat and meta.link_stat.type == "directory"
-  else
-    return false
+---@param adapter oil.Adapter
+---@return fun(a: oil.InternalEntry, b: oil.InternalEntry): boolean
+local function get_sort_function(adapter)
+  local idx_funs = {}
+  for _, sort_pair in ipairs(config.view_options.sort) do
+    local col_name, order = unpack(sort_pair)
+    if order ~= "asc" and order ~= "desc" then
+      vim.notify_once(
+        string.format(
+          "Column '%s' has invalid sort order '%s'. Should be either 'asc' or 'desc'",
+          col_name,
+          order
+        ),
+        vim.log.levels.WARN
+      )
+    end
+    local col = columns.get_column(adapter, col_name)
+    if col and col.get_sort_value then
+      table.insert(idx_funs, { col.get_sort_value, order })
+    else
+      vim.notify_once(
+        string.format("Column '%s' does not support sorting", col_name),
+        vim.log.levels.WARN
+      )
+    end
+  end
+  return function(a, b)
+    for _, sort_fn in ipairs(idx_funs) do
+      local get_sort_value, order = unpack(sort_fn)
+      local a_val = get_sort_value(a)
+      local b_val = get_sort_value(b)
+      if a_val ~= b_val then
+        if order == "desc" then
+          return a_val > b_val
+        else
+          return a_val < b_val
+        end
+      end
+    end
+    return a[FIELD_NAME] < b[FIELD_NAME]
   end
 end
 
@@ -390,14 +428,7 @@ local function render_buffer(bufnr, opts)
   local entries = cache.list_url(bufname)
   local entry_list = vim.tbl_values(entries)
 
-  table.sort(entry_list, function(a, b)
-    local a_isdir = is_entry_directory(a)
-    local b_isdir = is_entry_directory(b)
-    if a_isdir ~= b_isdir then
-      return a_isdir
-    end
-    return a[FIELD_NAME] < b[FIELD_NAME]
-  end)
+  table.sort(entry_list, get_sort_function(adapter))
 
   local jump_idx
   if opts.jump_first then
@@ -512,6 +543,21 @@ M.format_entry_cols = function(entry, column_defs, col_width, adapter)
   return cols
 end
 
+---Get the column names that are used for view and sort
+---@return string[]
+local function get_used_columns()
+  local cols = {}
+  for _, def in ipairs(config.columns) do
+    local name = util.split_config(def)
+    table.insert(cols, name)
+  end
+  for _, sort_pair in ipairs(config.view_options.sort) do
+    local name = sort_pair[1]
+    table.insert(cols, name)
+  end
+  return cols
+end
+
 ---@param bufnr integer
 ---@param opts nil|table
 ---    preserve_undo nil|boolean
@@ -579,7 +625,7 @@ M.render_buffer_async = function(bufnr, opts, callback)
   end
 
   cache.begin_update_url(bufname)
-  adapter.list(bufname, config.columns, function(err, entries, fetch_more)
+  adapter.list(bufname, get_used_columns(), function(err, entries, fetch_more)
     loading.set_loading(bufnr, false)
     if err then
       cache.end_update_url(bufname)

@@ -24,14 +24,12 @@ local default_config = {
     spell = false,
     list = false,
     conceallevel = 3,
-    concealcursor = "n",
+    concealcursor = "nvic",
   },
-  -- Restore window options to previous values when leaving an oil buffer
-  restore_win_options = true,
+  -- Send deleted files to the trash instead of permanently deleting them (:help oil-trash)
+  delete_to_trash = false,
   -- Skip the confirmation popup for simple operations
   skip_confirm_for_simple_edits = false,
-  -- Deleted files will be removed with the trash_command (below).
-  delete_to_trash = false,
   -- Change this to customize the command used when deleting to trash
   trash_command = "trash-put",
   -- Selecting a new/moved/renamed file or directory will prompt you to save changes first
@@ -55,6 +53,7 @@ local default_config = {
     ["_"] = "actions.open_cwd",
     ["`"] = "actions.cd",
     ["~"] = "actions.tcd",
+    ["gs"] = "actions.change_sort",
     ["g."] = "actions.toggle_hidden",
   },
   -- Set to false to disable all of the above keymaps
@@ -70,6 +69,12 @@ local default_config = {
     is_always_hidden = function(name, bufnr)
       return false
     end,
+    sort = {
+      -- sort order can be "asc" or "desc"
+      -- see :help oil-columns to see which columns are sortable
+      { "type", "asc" },
+      { "name", "asc" },
+    },
   },
   -- Configuration for the floating window in oil.open_float
   float = {
@@ -79,7 +84,7 @@ local default_config = {
     max_height = 0,
     border = "rounded",
     win_options = {
-      winblend = 10,
+      winblend = 0,
     },
     -- This is the config that will be passed to nvim_open_win.
     -- Change values here to customize the layout
